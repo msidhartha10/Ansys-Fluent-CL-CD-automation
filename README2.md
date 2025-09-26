@@ -1,7 +1,4 @@
-Perfect 🙌 glad to hear it’s working!
-Here’s a detailed **README.md** you can drop straight into your GitHub repo. It explains the motivation, setup, usage, and workflow for others who want to replicate your AoA sweep with Fluent + UDF.
 
----
 
 ```markdown
 # AoA Sweep in ANSYS Fluent with UDF
