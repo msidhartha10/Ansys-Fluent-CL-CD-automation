@@ -131,14 +131,22 @@ DEFINE_ON_DEMAND(compute_forces_and_write)
         Cl = 0.0;
     }
 
-    /* append result line: AoA_deg, Fx, Fy, Fd, Fl, Cd, Cl */
-    fp = fopen("aoa_results.txt", "a");
-    if (fp != NULL)
+  /* write header once (when aoa_deg == -999 for example) */
+fp = fopen("aoa_results.txt", "a");
+if (fp != NULL)
+{
+    /* If file is empty, write column names */
+    static int header_written = 0;
+    if (!header_written)
     {
-        /* header left to user; here we simply append lines */
-        fprintf(fp, "%g\t%g\t%g\t%g\t%g\t%g\t%g\n", (double)aoa_deg, (double)Fx, (double)Fy, (double)Fd, (double)Fl, (double)Cd, (double)Cl);
-        fclose(fp);
+        fprintf(fp, "AoA_deg\tFx[N]\tFy[N]\tFd[N]\tFl[N]\tCd\tCl\n");
+        header_written = 1;
     }
-    Message("AoA %g deg: Fx=%g, Fy=%g, Fd=%g, Fl=%g, Cd=%g, Cl=%g (written to aoa_results.txt)\n",
-            aoa_deg, Fx, Fy, Fd, Fl, Cd, Cl);
+
+    /* Then write actual numbers */
+    fprintf(fp, "%g\t%g\t%g\t%g\t%g\t%g\t%g\n",
+            (double)aoa_deg, (double)Fx, (double)Fy,
+            (double)Fd, (double)Fl, (double)Cd, (double)Cl);
+    fclose(fp);
 }
+
