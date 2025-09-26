@@ -81,70 +81,96 @@ DEFINE_PROFILE(inlet_V_profile, thread, index)
     end_f_loop(f, thread);
 }
 
-/* ----- On-demand postprocess: compute forces, convert to lift/drag, write to file ----- */
+/* --- On-demand postprocess: forces + moments + coeffs --- */
 DEFINE_ON_DEMAND(compute_forces_and_write)
 {
     Domain *d = Get_Domain(1);
     Thread *t_airfoil;
-    real cg[ND_ND];
+    real cg[ND_ND];         /* reference point (aero center) */
     real force[ND_ND], moment[ND_ND];
-    real Fx, Fy; /* global force components (x,y) */
+    real Fx, Fy, Fz;
+    real Mx, My, Mz;
     real a_rad, qinf;
     real Fd, Fl, Cd, Cl;
+    real Cmx, Cmy, Cmz;     /* roll, pitch, yaw moment coefficients */
     FILE *fp;
 
-    /* ensure AoA is up to date */
+    /* === Step 1: ensure AoA is up to date === */
     read_aoa_from_file();
     a_rad = aoa_deg * PI / 180.0;
 
-    /* get the thread pointer for the airfoil face zone */
+    /* === Step 2: locate surface thread === */
     t_airfoil = Lookup_Thread(d, SURFACE_ZONE_ID);
     if (t_airfoil == NULL)
     {
-        Message("aoa_udf: ERROR - could not find zone id %d. Edit SURFACE_ZONE_ID in aoa_udf.c\n", SURFACE_ZONE_ID);
+        Message("aoa_udf: ERROR - zone id %d not found. Edit SURFACE_ZONE_ID.\n", SURFACE_ZONE_ID);
         return;
     }
 
-    /* choose a center for moment calculations (not used here) */
-    cg[0] = cg[1] = cg[2] = 0.0;
+    /* === Step 3: set aerodynamic center (reference point for moments) === */
+    cg[0] = 0.25 * LREF;   /* x = quarter-chord */
+    cg[1] = 0.0;           /* y = mid-span (centerline) */
+    cg[2] = 0.0;           /* z = 0 plane */
 
-    /* compute force and moment on that face-thread (pressure+viscous if last arg TRUE) */
+    /* === Step 4: compute force & moment === */
     Compute_Force_And_Moment(d, t_airfoil, cg, force, moment, TRUE);
 
-    Fx = force[0];
-    Fy = force[1];
+    Fx = force[0];  /* x force */
+    Fy = force[1];  /* y force */
+    Fz = force[2];  /* z force (for 3D case) */
 
-    /* Drag = component along freestream; Lift = perpendicular (positive 'up') */
+    Mx = moment[0]; /* roll moment */
+    My = moment[1]; /* pitch moment */
+    Mz = moment[2]; /* yaw moment */
+
+    /* === Step 5: Lift/Drag decomposition === */
     Fd = Fx * cos(a_rad) + Fy * sin(a_rad);
     Fl = -Fx * sin(a_rad) + Fy * cos(a_rad);
 
+    /* === Step 6: dynamic pressure === */
     qinf = 0.5 * RHO * UINF * UINF;
 
+    /* === Step 7: Coefficients === */
     if (qinf * AREF != 0.0)
     {
         Cd = Fd / (qinf * AREF);
         Cl = Fl / (qinf * AREF);
+
+        Cmx = Mx / (qinf * AREF * LREF);  /* roll coeff */
+        Cmy = My / (qinf * AREF * LREF);  /* pitch coeff */
+        Cmz = Mz / (qinf * AREF * LREF);  /* yaw coeff */
     }
     else
     {
-        Cd = 0.0;
-        Cl = 0.0;
-    }
-/* write header once (when aoa_deg == -999 for example) */
-fp = fopen("aoa_results.txt", "a");
-if (fp != NULL)
-{
-    /* If file is empty, write column names */
-    static int header_written = 0;
-    if (!header_written)
-    {
-        fprintf(fp, "AoA_deg\tFx[N]\tFy[N]\tFd[N]\tFl[N]\tCd\tCl\n");
-        header_written = 1;
+        Cd = Cl = 0.0;
+        Cmx = Cmy = Cmz = 0.0;
     }
 
-    /* Then write actual numbers */
-    fprintf(fp, "%g\t%g\t%g\t%g\t%g\t%g\t%g\n",
-            (double)aoa_deg, (double)Fx, (double)Fy,
-            (double)Fd, (double)Fl, (double)Cd, (double)Cl);
-    fclose(fp);
+    /* === Step 8: write to file === */
+    fp = fopen("aoa_results.txt", "a");
+    if (fp != NULL)
+    {
+        static int header_written = 0;
+        if (!header_written)
+        {
+            fprintf(fp,
+                "AoA_deg\tFx[N]\tFy[N]\tFz[N]\tFd[N]\tFl[N]\tCd\tCl\t"
+                "Mx[Nm]\tMy[Nm]\tMz[Nm]\tCmx\tCmy\tCmz\n");
+            header_written = 1;
+        }
+
+        fprintf(fp,
+            "%g\t%g\t%g\t%g\t%g\t%g\t%g\t%g\t"
+            "%g\t%g\t%g\t%g\t%g\t%g\n",
+            (double)aoa_deg,
+            (double)Fx, (double)Fy, (double)Fz,
+            (double)Fd, (double)Fl, (double)Cd, (double)Cl,
+            (double)Mx, (double)My, (double)Mz,
+            (double)Cmx, (double)Cmy, (double)Cmz);
+
+        fclose(fp);
+    }
+
+    Message("AoA %g deg: Fx=%g Fy=%g Fz=%g Fd=%g Fl=%g Cd=%g Cl=%g | Mx=%g My=%g Mz=%g Cmx=%g Cmy=%g Cmz=%g\n",
+            aoa_deg, Fx, Fy, Fz, Fd, Fl, Cd, Cl, Mx, My, Mz, Cmx, Cmy, Cmz);
 }
