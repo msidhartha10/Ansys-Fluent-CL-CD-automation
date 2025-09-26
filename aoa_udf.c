@@ -1,0 +1,144 @@
+/* aoa_udf.c
+   - Inlet velocity components (U,V) are provided by two DEFINE_PROFILE functions.
+     They read the current AoA (deg) from "aoa.txt" in Fluent's working directory.
+   - A DEFINE_ON_DEMAND function computes forces on the airfoil surface (zone id
+     must be edited below) using Compute_Force_And_Moment, computes Fd & Fl,
+     then computes Cd and Cl and appends a line to aoa_results.txt.
+
+   Edit these macros before compiling:
+     - SURFACE_ZONE_ID   : set to the face-zone ID of your airfoil/wing surface
+     - UINF              : freestream speed (m/s) = 16 as you requested
+     - RHO               : fluid density (kg/m3) — change if your case uses different
+     - AREF              : reference area (m^2) = 0.4 (you specified)
+     - LREF              : reference length (m) = 0.435 (you specified) [not used in CD/CL calc here but kept for record]
+*/
+
+#include "udf.h"
+#include <stdio.h>
+#include <math.h>
+
+/* --- USER EDITS --- */
+#define SURFACE_ZONE_ID  5      /* <<< CHANGE this to your airfoil face-zone ID */
+#define UINF             16.0   /* m/s (given) */
+#define RHO              1.225  /* kg/m3 - change if your material density differs */
+#define AREF             0.4    /* m^2 (given) */
+#define LREF             0.435  /* m (given) */
+/* ------------------- */
+
+#define PI 3.14159265358979323846
+
+/* store latest AoA (deg) in a static variable so both functions share it */
+static real aoa_deg = 0.0;
+
+/* read a single numeric AoA (deg) from aoa.txt (first token). Silent if file missing. */
+static void read_aoa_from_file(void)
+{
+    FILE *fp = fopen("aoa.txt", "r");
+    if (fp)
+    {
+        double tmp;
+        if (fscanf(fp, "%lf", &tmp) == 1)
+            aoa_deg = (real) tmp;
+        fclose(fp);
+    }
+    else
+    {
+        /* file not found: keep previous aoa_deg (or 0.0 on first run) */
+        /* If you want a warning uncomment next line */
+        /* Message("aoa_udf: aoa.txt not found in working dir\n"); */
+    }
+}
+
+/* ----- inlet U component profile (X-direction) ----- */
+DEFINE_PROFILE(inlet_U_profile, thread, index)
+{
+    face_t f;
+    real ux;
+    read_aoa_from_file();
+    real a_rad = aoa_deg * PI / 180.0;
+    ux = UINF * cos(a_rad);
+
+    begin_f_loop(f, thread)
+    {
+        F_PROFILE(f, thread, index) = ux;
+    }
+    end_f_loop(f, thread);
+}
+
+/* ----- inlet V component profile (Y-direction) ----- */
+DEFINE_PROFILE(inlet_V_profile, thread, index)
+{
+    face_t f;
+    real uy;
+    read_aoa_from_file();
+    real a_rad = aoa_deg * PI / 180.0;
+    uy = UINF * sin(a_rad);
+
+    begin_f_loop(f, thread)
+    {
+        F_PROFILE(f, thread, index) = uy;
+    }
+    end_f_loop(f, thread);
+}
+
+/* ----- On-demand postprocess: compute forces, convert to lift/drag, write to file ----- */
+DEFINE_ON_DEMAND(compute_forces_and_write)
+{
+    Domain *d = Get_Domain(1);
+    Thread *t_airfoil;
+    real cg[ND_ND];
+    real force[ND_ND], moment[ND_ND];
+    real Fx, Fy; /* global force components (x,y) */
+    real a_rad, qinf;
+    real Fd, Fl, Cd, Cl;
+    FILE *fp;
+
+    /* ensure AoA is up to date */
+    read_aoa_from_file();
+    a_rad = aoa_deg * PI / 180.0;
+
+    /* get the thread pointer for the airfoil face zone */
+    t_airfoil = Lookup_Thread(d, SURFACE_ZONE_ID);
+    if (t_airfoil == NULL)
+    {
+        Message("aoa_udf: ERROR - could not find zone id %d. Edit SURFACE_ZONE_ID in aoa_udf.c\n", SURFACE_ZONE_ID);
+        return;
+    }
+
+    /* choose a center for moment calculations (not used here) */
+    cg[0] = cg[1] = cg[2] = 0.0;
+
+    /* compute force and moment on that face-thread (pressure+viscous if last arg TRUE) */
+    Compute_Force_And_Moment(d, t_airfoil, cg, force, moment, TRUE);
+
+    Fx = force[0];
+    Fy = force[1];
+
+    /* Drag = component along freestream; Lift = perpendicular (positive 'up') */
+    Fd = Fx * cos(a_rad) + Fy * sin(a_rad);
+    Fl = -Fx * sin(a_rad) + Fy * cos(a_rad);
+
+    qinf = 0.5 * RHO * UINF * UINF;
+
+    if (qinf * AREF != 0.0)
+    {
+        Cd = Fd / (qinf * AREF);
+        Cl = Fl / (qinf * AREF);
+    }
+    else
+    {
+        Cd = 0.0;
+        Cl = 0.0;
+    }
+
+    /* append result line: AoA_deg, Fx, Fy, Fd, Fl, Cd, Cl */
+    fp = fopen("aoa_results.txt", "a");
+    if (fp != NULL)
+    {
+        /* header left to user; here we simply append lines */
+        fprintf(fp, "%g\t%g\t%g\t%g\t%g\t%g\t%g\n", (double)aoa_deg, (double)Fx, (double)Fy, (double)Fd, (double)Fl, (double)Cd, (double)Cl);
+        fclose(fp);
+    }
+    Message("AoA %g deg: Fx=%g, Fy=%g, Fd=%g, Fl=%g, Cd=%g, Cl=%g (written to aoa_results.txt)\n",
+            aoa_deg, Fx, Fy, Fd, Fl, Cd, Cl);
+}

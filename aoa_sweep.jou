@@ -1,0 +1,45 @@
+; aoa_sweep.jou -- Journal to sweep angles of attack
+
+; remove old result files if present
+!del aoa_results.txt
+!del aoa.txt
+
+/solve/initialize/initialize-flow
+
+; ---- angle -5.0 ----
+!echo -5.0 > aoa.txt
+/solve/iterate 500
+/define/user-defined/execute-on-demand "compute_forces_and_write::libudf"
+
+; ---- angle -2.5 ----
+!echo -2.5 > aoa.txt
+/solve/iterate 500
+/define/user-defined/execute-on-demand "compute_forces_and_write::libudf"
+
+; ---- angle 0.0 ----
+!echo 0.0 > aoa.txt
+/solve/iterate 500
+/define/user-defined/execute-on-demand "compute_forces_and_write::libudf"
+
+; ---- angle 2.5 ----
+!echo 2.5 > aoa.txt
+/solve/iterate 500
+/define/user-defined/execute-on-demand "compute_forces_and_write::libudf"
+
+; ---- angle 5.0 ----
+!echo 5.0 > aoa.txt
+/solve/iterate 500
+/define/user-defined/execute-on-demand "compute_forces_and_write::libudf"
+
+; ---- angle 7.5 ----
+!echo 7.5 > aoa.txt
+/solve/iterate 500
+/define/user-defined/execute-on-demand "compute_forces_and_write::libudf"
+
+; ---- angle 10.0 ----
+!echo 10.0 > aoa.txt
+/solve/iterate 500
+/define/user-defined/execute-on-demand "compute_forces_and_write::libudf"
+
+; finished
+/exit
